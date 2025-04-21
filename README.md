@@ -32,19 +32,6 @@ npm start
 
 Then open http://localhost:3000 in your browser.
 
-### Option 2: Local Files (Most Reliable)
-
-If you experience issues with CDN-loaded libraries:
-
-```bash
-# Download local copies of libraries and create local.html
-bash local-setup.sh
-
-# Start a local server
-npm start
-```
-
-Then open http://localhost:3000/local.html in your browser.
 
 ## Troubleshooting
 

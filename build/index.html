@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanji Video Player</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+        }
+        video {
+            width: 100%;
+        }
+        .subtitle-area {
+            position: absolute;
+            bottom: 50px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: white;
+            text-shadow: 1px 1px 1px black;
+            font-size: 20px;
+            padding: 10px;
+            z-index: 10;
+            transition: font-size 0.3s, bottom 0.3s;
+        }
+        .subtitle-text {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: inline-block;
+            max-width: 80%;
+            margin: 0 auto;
+        }
+        .controls {
+            margin: 15px 0;
+        }
+        button {
+            padding: 8px 12px;
+            margin-right: 10px;
+        }
+        .file-inputs {
+            margin-bottom: 20px;
+        }
+        rt {
+            font-size: 0.6em;
+            color: #ffffff;
+        }
+        
+        /* Fullscreen specific styles */
+        .video-container:fullscreen {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-container:fullscreen video {
+            max-height: 100%;
+        }
+        
+        /* Vendor prefixed versions */
+        .video-container:-webkit-full-screen {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-container:-moz-full-screen {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-container:-ms-fullscreen {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Kanji Video Player</h1>
+    
+    <div class="file-inputs">
+        <label>
+            Select Video (MP4/MKV):
+            <input type="file" id="video-input" accept=".mp4,.mkv">
+        </label>
+        <br><br>
+        <label>
+            Select Subtitles (SRT):
+            <input type="file" id="subtitle-input" accept=".srt">
+        </label>
+    </div>
+    
+    <div class="video-container">
+        <video id="video-player" controls></video>
+        <div class="subtitle-area">
+            <div class="subtitle-text" id="subtitle-display"></div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button id="play-btn">Play</button>
+        <button id="pause-btn">Pause</button>
+        <span id="loading-status"></span>
+        <button id="fullscreen-btn">Fullscreen</button>
+    </div>
+
+    <!-- Kuroshiro for kanji processing -->
+    <script src="lib/kuroshiro.min.js"></script>
+    <script src="lib/kuroshiro-analyzer-kuromoji.min.js"></script>
+    
+    <!-- Check if libraries loaded correctly -->
+    <script>
+        window.addEventListener('load', function() {
+            if (typeof Kuroshiro === 'undefined') {
+                console.error('Kuroshiro not loaded correctly');
+                document.getElementById('loading-status').textContent = 
+                    'Error: Kuroshiro library not loaded. Check console for details.';
+            }
+            
+            if (typeof KuromojiAnalyzer === 'undefined') {
+                console.error('KuromojiAnalyzer not loaded correctly');
+                document.getElementById('loading-status').textContent = 
+                    'Error: KuromojiAnalyzer library not loaded. Check console for details.';
+            }
+        });
+    </script>
+    
+    <!-- Custom scripts -->
+    <script src="subtitle-parser.js"></script>
+    <script src="video-player.js"></script>
+</body>
+</html> 
