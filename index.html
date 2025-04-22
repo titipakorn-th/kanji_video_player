@@ -51,7 +51,51 @@
         }
         rt {
             font-size: 0.6em;
-            color: #ffffff;
+            color: yellow;
+        }
+        
+        /* Kanji popup styles */
+        .kanji-word {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            border-bottom: 1px dotted #FFC107;
+        }
+        
+        .kanji-popup {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            white-space: nowrap;
+            display: none;
+            z-index: 100;
+            margin-bottom: 5px;
+            min-width: 100px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            pointer-events: none; /* Prevents the popup from blocking other elements */
+        }
+        
+        /* Small arrow at the bottom of popup */
+        .kanji-popup::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: rgba(0, 0, 0, 0.8) transparent transparent transparent;
+        }
+        
+        .kanji-word:hover .kanji-popup {
+            display: block;
         }
         
         /* Fullscreen specific styles */
@@ -144,6 +188,7 @@
     </script>
     
     <!-- Custom scripts -->
+    <script src="kanji-dictionary.js"></script>
     <script src="subtitle-parser.js"></script>
     <script src="video-player.js"></script>
 </body>
