@@ -132,10 +132,14 @@ class VideoPlayer {
         if (subtitle !== this.currentSubtitle) {
             this.currentSubtitle = subtitle;
             
-            if (!subtitle) {
+            if (!subtitle || !subtitle.text || subtitle.text.trim() === '') {
                 this.subtitleDisplay.innerHTML = '';
+                this.subtitleArea.style.display = 'none'; // Hide subtitle area when no text
                 return;
             }
+            
+            // Show subtitle area since we have text
+            this.subtitleArea.style.display = 'block';
             
             // Process subtitle text
             try {
@@ -181,421 +185,296 @@ class VideoPlayer {
      */
     async enhanceWithKanjiPopups(originalText) {
         try {
-            // Log the original text before any processing
-            console.log("Original subtitle text:", originalText);
+            // Initialize segmentedWords array
+            let segmentedWords = [];
             
-            // First, get the current HTML which contains ruby elements with furigana
-            const currentHTML = this.subtitleDisplay.innerHTML;
-            console.log("Original HTML with ruby tags:", currentHTML);
-            
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = currentHTML;
-            
-            // Extract kanji words from ruby elements - these are already identified words with readings
-            const rubyElements = tempDiv.querySelectorAll('ruby');
-            const rubyWords = [];
-            
-            // Log all ruby elements found
-            console.log(`Found ${rubyElements.length} ruby elements in the subtitle`);
-            
-            // Map to store word data for quick lookup
-            const wordDataMap = new Map();
-            
-            // Process ruby elements - they're already identified as words
-            for (const ruby of rubyElements) {
-                console.log("Ruby element content:", ruby.outerHTML);
-                const baseText = this.getRubyBase(ruby);
-                if (baseText && baseText.trim() !== '') {
-                    // Clean the word to remove any parentheses
-                    const word = baseText.trim().replace(/[()]/g, '');
+            // Use the existing initialized kuroshiro analyzer instead of creating a new one
+            if (this.kuroshiro && this.kuroshiroReady) {
+                try {
+                    // Get the analyzer from Kuroshiro
+                    const analyzer = this.kuroshiro._analyzer;
                     
-                    // Skip duplicates
-                    if (rubyWords.some(w => w.word === word)) {
-                        continue;
+                    if (analyzer) {
+                        // Parse text into tokens using Kuromoji
+                        const tokens = await analyzer.parse(originalText);
+                        
+                        // Filter tokens based on part of speech
+                        const targetPos = ["名詞", "動詞", "副詞", "形容詞"];
+                        segmentedWords = tokens
+                            .filter(token => targetPos.includes(token.pos))
+                            .map(token => ({
+                                word: token.surface_form,
+                                // Convert katakana to hiragana if present
+                                reading: this.convertKatakanaToHiragana(token.reading || ""),
+                                pos: token.pos
+                            }));
                     }
+                } catch (error) {
+                    console.error("Error tokenizing text:", error.message);
+                }
+            }
+            
+            // Process words from Kuromoji analysis
+            const kanjiWords = [];
+            
+            // Keep track of the original positions in the text
+            let textIndex = 0;
+            for (const wordData of segmentedWords) {
+                const word = wordData.word;
+                
+                // Skip empty words
+                if (!word || word.trim() === '') continue;
+                
+                // Find position of this word - we need to search from start each time to get accurate positioning
+                const position = originalText.indexOf(word, textIndex);
+                if (position === -1) {
+                    // If word not found continuing from last position, try from beginning
+                    const posFromStart = originalText.indexOf(word);
+                    if (posFromStart === -1) continue; // Skip if word not found at all
                     
-                    // Get the reading from the rt element
-                    const rtElement = ruby.querySelector('rt');
-                    const reading = rtElement ? rtElement.textContent.trim() : '';
-                    
-                    // Find the position in the original text
-                    let position = originalText.indexOf(word);
-                    // Even if not found in original text, process it anyway
-                    if (position === -1) {
-                        console.log(`Word "${word}" not found in original text, using default position`);
-                        position = 0; // Use a default position
-                    } else {
-                        console.log(`Found ruby element for kanji word: "${word}" with reading: "${reading}" at position ${position}`);
-                    }
-                    
-                    // Extract individual kanji characters from the word
-                    const kanjiChars = [];
-                    for (let i = 0; i < word.length; i++) {
-                        const char = word.charAt(i);
-                        // Basic check for kanji
-                        if (/[\u4e00-\u9faf\u3400-\u4dbf]/.test(char)) {
-                            kanjiChars.push(char);
+                    // Add to word list with position from start
+                    const wordObj = {
+                        word: word,
+                        position: posFromStart,
+                        length: word.length,
+                        data: {
+                            word: word,
+                            hiragana: wordData.reading,
+                            meaning: null
                         }
-                    }
+                    };
                     
-                    console.log(`Kanji characters in "${word}":`, kanjiChars);
-                    
-                    // Store the word with its position
-                    rubyWords.push({
+                    kanjiWords.push(wordObj);
+                    textIndex = posFromStart + word.length;
+                } else {
+                    // Add to word list with found position
+                    const wordObj = {
                         word: word,
                         position: position,
                         length: word.length,
-                        kanjiChars: kanjiChars,
                         data: {
                             word: word,
-                            hiragana: reading,
-                            meaning: null // We'll fetch this from the API
+                            hiragana: wordData.reading,
+                            meaning: null
                         }
-                    });
+                    };
                     
-                    // Store in map for later lookup
-                    wordDataMap.set(word, rubyWords[rubyWords.length - 1]);
+                    kanjiWords.push(wordObj);
+                    textIndex = position + word.length;
                 }
             }
             
-            // Get meanings for ruby words using search/inflected
-            if (rubyWords.length > 0) {
-                console.log(`Looking up meanings for ${rubyWords.length} ruby words`);
-                
-                // Process each ruby word to get its meaning
-                for (const wordObj of rubyWords) {
-                    const word = wordObj.word;
-                    try {
-                        // Instead of looking up the whole word, let's look up each kanji
-                        if (wordObj.kanjiChars && wordObj.kanjiChars.length > 0) {
-                            console.log(`Looking up individual kanji for "${word}": ${wordObj.kanjiChars.join(', ')}`);
-                            
-                            // Use the buildMeaningFromKanji method instead of inline lookup
-                            await this.buildMeaningFromKanji(wordObj);
-                        } else {
-                            // No kanji found, try direct API lookup
-                            await this.lookupWholeWord(wordObj);
-                        }
-                    } catch (error) {
-                        console.error(`Error processing word "${word}":`, error);
-                        wordObj.data.meaning = "Error fetching meaning";
-                    }
+            // Process each word to get its meaning
+            for (const wordObj of kanjiWords) {
+                try {
+                    // Look up meaning
+                    await this.lookupWholeWord(wordObj);
+                } catch (error) {
+                    wordObj.data.meaning = "Error fetching meaning";
                 }
             }
             
-            // Look for additional kanji words in the text not covered by ruby elements
-            console.log("Looking for additional kanji words not covered by ruby elements");
-            
-            // Get kanji words from the text
-            const expectedWords = rubyWords.map(w => w.word);
-            console.log("Expected words from ruby elements:", expectedWords);
-            const kanjiWords = await kanjiDictionary.findKanjiWords(originalText, expectedWords);
-            
-            // Combine ruby words and additional detected words
-            const allWords = [...rubyWords];
-            
-            // Add newly found words that aren't ruby words
-            for (const word of kanjiWords) {
-                if (!wordDataMap.has(word.word)) {
-                    allWords.push(word);
-                    wordDataMap.set(word.word, word);
-                }
+            if (kanjiWords.length === 0) {
+                return; // No words found
             }
+
+            // First convert the original text with furigana using Kuroshiro
+            let formattedHTML = await this.processSubtitleText(originalText);
             
-            if (allWords.length === 0) {
-                console.log("No kanji words found in subtitle");
-                return; // No kanji words found
-            }
+            // Create a temporary div to work with the HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = formattedHTML;
             
-            console.log(`Found ${allWords.length} total kanji words in subtitle:`, allWords.map(w => w.word));
+            // Sort words by position - longer words first to avoid nested highlights
+            kanjiWords.sort((a, b) => {
+                // First by position
+                if (a.position !== b.position) return a.position - b.position;
+                // Then by length (longer first)
+                return b.length - a.length;
+            });
             
-            // Sort words by position
-            allWords.sort((a, b) => a.position - b.position);
+            // Apply the overlay highlighting approach
+            this.applyHighlighting(tempDiv, kanjiWords, originalText);
             
-            // Create a document fragment to hold our modified content
-            const fragment = document.createDocumentFragment();
-            
-            // Process the DOM to add popups while preserving furigana
-            this.processTextNodesForKanji(tempDiv, fragment, allWords);
-            
-            // Replace the content
-            this.subtitleDisplay.innerHTML = '';
-            this.subtitleDisplay.appendChild(fragment);
+            // Use the processed HTML
+            this.subtitleDisplay.innerHTML = tempDiv.innerHTML;
         } catch (error) {
-            console.error("Error enhancing with kanji popups:", error);
+            console.error("Error enhancing with kanji popups:", error.message);
         }
     }
     
     /**
-     * Build a meaning for a word from its individual kanji characters
-     * @param {Object} wordObj - The word object to add meaning to
+     * Convert katakana to hiragana
+     * @param {string} text - Text that may contain katakana
+     * @returns {string} - Text with katakana converted to hiragana
      */
-    async buildMeaningFromKanji(wordObj) {
-        console.log(`No longer looking up individual kanji for "${wordObj.word}"`);
+    convertKatakanaToHiragana(text) {
+        if (!text) return "";
         
-        // Try to look up the whole word instead
-        await this.lookupWholeWord(wordObj);
-        
-        // If lookupWholeWord didn't find a meaning, set a default
-        if (!wordObj.data.meaning) {
-            wordObj.data.meaning = "No definition available";
-        }
+        // Convert katakana to hiragana
+        return text.replace(/[\u30A1-\u30F6]/g, function(match) {
+            return String.fromCharCode(match.charCodeAt(0) - 0x60);
+        });
     }
     
     /**
-     * Process text nodes to add kanji popups while preserving ruby annotations
-     * @param {Node} node - Current DOM node
-     * @param {DocumentFragment} fragment - Document fragment to build result
-     * @param {Array} kanjiWords - Array of kanji words with positions
+     * Apply highlighting to all text nodes in the document
+     * @param {Node} rootNode - The root DOM node to process
+     * @param {Array} kanjiWords - Kanji words to highlight
+     * @param {string} originalText - Original text for positional reference
      */
-    processTextNodesForKanji(node, fragment, kanjiWords) {
-        // Process recursively for all node types to preserve structure
-        this.processNode(node, fragment, kanjiWords);
-    }
-    
-    /**
-     * Process a DOM node and its children to add kanji popups
-     * @param {Node} node - The node to process
-     * @param {DocumentFragment} fragment - Fragment to append processed content to
-     * @param {Array} kanjiWords - Array of kanji words to highlight
-     */
-    processNode(node, fragment, kanjiWords) {
-        if (!node) return;
+    applyHighlighting(rootNode, kanjiWords, originalText) {
+        // Use a different approach - collect all text nodes first
+        const textNodes = [];
+        this.collectTextNodes(rootNode, textNodes);
         
-        // Clone node if it's not a text node
-        if (node.nodeType !== Node.TEXT_NODE) {
-            const isRuby = node.nodeName.toLowerCase() === 'ruby';
-            const isRt = node.nodeName.toLowerCase() === 'rt';
+        // Build a map of words by position for quick lookup
+        const wordMap = new Map();
+        kanjiWords.forEach(word => {
+            const key = word.position + ':' + word.length;
+            wordMap.set(key, word);
+        });
+        
+        // Calculate original text positions for each text node
+        let currentTextPosition = 0;
+        const textNodePositions = new Map();
+        
+        for (const textNode of textNodes) {
+            const text = textNode.nodeValue;
+            if (!text) continue;
             
-            // Skip ruby processing if it's an rt element (reading part)
-            if (isRt) {
-                const clone = node.cloneNode(true);
-                fragment.appendChild(clone);
-                return;
+            // Find this text in the original
+            const position = originalText.indexOf(text, currentTextPosition);
+            if (position !== -1) {
+                textNodePositions.set(textNode, position);
+                currentTextPosition = position + text.length;
             }
+        }
+        
+        // Now process each text node to add highlights
+        for (const textNode of textNodes) {
+            const text = textNode.nodeValue;
+            if (!text || text.trim() === '') continue;
             
-            // For ruby elements, we need special handling
-            if (isRuby) {
-                // For ruby, we need to check if it contains any kanji words
-                // If it does, we'll wrap the ruby in a kanji-word span
-                const rubyText = node.textContent.replace(/\s+/g, ''); // Remove whitespace
-                const rubyBase = this.getRubyBase(node);
-                
-                // Check if any kanji word matches this ruby element
-                const matchingKanjiWord = kanjiWords.find(kw => 
-                    rubyBase === kw.word || rubyBase.includes(kw.word) || kw.word.includes(rubyBase)
+            // Find words that overlap with this text node's position
+            const nodePosition = textNodePositions.get(textNode) || 0;
+            const nodeEndPosition = nodePosition + text.length;
+            
+            // Find words that are contained within this text node
+            const relevantWords = kanjiWords.filter(word => {
+                const wordEndPosition = word.position + word.length;
+                return (
+                    // Word starts within this text node
+                    (word.position >= nodePosition && word.position < nodeEndPosition) ||
+                    // Word overlaps with start of this text node
+                    (word.position < nodePosition && wordEndPosition > nodePosition)
                 );
+            }).sort((a, b) => {
+                // Sort by adjusted position within this text node
+                return (a.position - nodePosition) - (b.position - nodePosition);
+            });
+            
+            if (relevantWords.length === 0) continue;
+            
+            // Create fragments to replace this node
+            const fragments = [];
+            let lastIndex = 0;
+            
+            // Process words in this text node
+            for (const wordObj of relevantWords) {
+                // Calculate the adjusted position of this word within the text node
+                const wordStartInNode = Math.max(0, wordObj.position - nodePosition);
                 
-                if (matchingKanjiWord) {
-                    // Create wrapper for the kanji word with popup
-                    const wrapper = document.createElement('span');
-                    wrapper.className = 'kanji-word';
-                    
-                    // Create popup with meaning
-                    const popup = document.createElement('span');
-                    popup.className = 'kanji-popup';
-                    
-                    // Format the popup content
-                    if (matchingKanjiWord.data) {
-                        const content = [];
-                        if (matchingKanjiWord.data.hiragana) {
-                            content.push(matchingKanjiWord.data.hiragana);
-                        }
-                        if (matchingKanjiWord.data.meaning) {
-                            content.push(matchingKanjiWord.data.meaning);
-                        }
-                        popup.textContent = content.join(' - ');
-                    } else {
-                        popup.textContent = 'No meaning available';
+                // Skip if word would start after this node ends
+                if (wordStartInNode >= text.length) continue;
+                
+                // Calculate how much of the word fits in this text node
+                const availableLength = text.length - wordStartInNode;
+                const wordLengthInNode = Math.min(wordObj.length, availableLength);
+                
+                // Skip if position would be invalid
+                if (wordStartInNode < 0 || wordLengthInNode <= 0) continue;
+                
+                // Add text before the word
+                if (wordStartInNode > lastIndex) {
+                    fragments.push(document.createTextNode(text.substring(lastIndex, wordStartInNode)));
+                }
+                
+                // Get the actual word text from this node (might be partial)
+                const wordText = text.substr(wordStartInNode, wordLengthInNode);
+                
+                // Create a span for the word
+                const wordSpan = document.createElement('span');
+                wordSpan.className = 'kanji-word';
+                wordSpan.textContent = wordText;
+                
+                // Create popup with meaning
+                const popup = document.createElement('span');
+                popup.className = 'kanji-popup';
+                
+                // Format popup content
+                if (wordObj.data) {
+                    const content = [];
+                    if (wordObj.data.hiragana) {
+                        content.push(wordObj.data.hiragana);
                     }
-                    
-                    // Clone the ruby element
-                    const rubyClone = node.cloneNode(true);
-                    
-                    // Add the popup and ruby to the wrapper
-                    wrapper.appendChild(popup);
-                    wrapper.appendChild(rubyClone);
-                    
-                    // Add the wrapper to the fragment
-                    fragment.appendChild(wrapper);
+                    if (wordObj.data.meaning) {
+                        content.push(wordObj.data.meaning);
+                    }
+                    popup.textContent = content.join(' - ');
                 } else {
-                    // If no match, just clone the ruby
-                    const clone = node.cloneNode(true);
-                    fragment.appendChild(clone);
+                    popup.textContent = 'No meaning available';
                 }
                 
+                wordSpan.appendChild(popup);
+                fragments.push(wordSpan);
+                
+                // Update last index
+                lastIndex = wordStartInNode + wordLengthInNode;
+            }
+            
+            // Add any remaining text
+            if (lastIndex < text.length) {
+                fragments.push(document.createTextNode(text.substring(lastIndex)));
+            }
+            
+            // Only replace if we found words
+            if (fragments.length > 0 && lastIndex > 0) {
+                // Create a fragment to hold all the new nodes
+                const fragment = document.createDocumentFragment();
+                fragments.forEach(f => fragment.appendChild(f));
+                
+                // Replace the original text node with our fragments
+                const parent = textNode.parentNode;
+                if (parent) {
+                    parent.replaceChild(fragment, textNode);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Collect all text nodes under a root node
+     * @param {Node} node - The node to process
+     * @param {Array} textNodes - Array to store text nodes
+     */
+    collectTextNodes(node, textNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            // If it's a non-empty text node, add it to our collection
+            if (node.nodeValue && node.nodeValue.trim() !== '') {
+                textNodes.push(node);
+            }
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            // Skip RT elements (readings in ruby annotations)
+            if (node.nodeName.toLowerCase() === 'rt' || node.nodeName.toLowerCase() === 'rp') {
                 return;
             }
             
-            // For other element nodes, create a new element of the same type
-            const newNode = document.createElement(node.nodeName);
-            
-            // Copy all attributes
-            Array.from(node.attributes).forEach(attr => {
-                newNode.setAttribute(attr.name, attr.value);
-            });
-            
-            // Create a fragment for this node's children
-            const childFragment = document.createDocumentFragment();
-            
-            // Process each child node
-            Array.from(node.childNodes).forEach(child => {
-                this.processNode(child, childFragment, kanjiWords);
-            });
-            
-            // Append processed children
-            newNode.appendChild(childFragment);
-            
-            // Add to parent fragment
-            fragment.appendChild(newNode);
-            
-            return;
-        }
-        
-        // Handle text nodes - this is where we check for kanji words
-        const text = node.textContent;
-        if (!text || text.trim() === '') {
-            fragment.appendChild(document.createTextNode(text));
-            return;
-        }
-        
-        // Get kanji words that appear in this text node
-        const relevantWords = kanjiWords.filter(kw => 
-            text.includes(kw.word)
-        ).sort((a, b) => {
-            // First sort by position within the text node
-            const posA = text.indexOf(a.word);
-            const posB = text.indexOf(b.word);
-            if (posA !== posB) return posA - posB;
-            
-            // If positions are the same, prefer longer words
-            return b.word.length - a.word.length;
-        });
-        
-        if (relevantWords.length === 0) {
-            // No kanji words in this text, just add it as is
-            fragment.appendChild(document.createTextNode(text));
-            return;
-        }
-        
-        // Process text with kanji words
-        let lastIndex = 0;
-        let processedIndexes = new Set(); // Track already processed parts of the text
-        
-        for (const word of relevantWords) {
-            // Find position of this word in the text
-            let position = text.indexOf(word.word, lastIndex);
-            
-            // If not found from lastIndex, or if this region is already processed, skip
-            if (position === -1 || this.isRangeProcessed(position, position + word.word.length, processedIndexes)) {
-                continue;
-            }
-            
-            // Add text before match
-            if (position > lastIndex) {
-                fragment.appendChild(
-                    document.createTextNode(text.substring(lastIndex, position))
-                );
-            }
-            
-            // Create span for the kanji word with popup
-            const wordSpan = document.createElement('span');
-            wordSpan.className = 'kanji-word';
-            wordSpan.textContent = word.word;
-            
-            // Create popup with meaning
-            const popup = document.createElement('span');
-            popup.className = 'kanji-popup';
-            
-            // Format the popup content
-            if (word.data) {
-                const content = [];
-                if (word.data.hiragana) {
-                    content.push(word.data.hiragana);
-                }
-                if (word.data.meaning) {
-                    content.push(word.data.meaning);
-                }
-                popup.textContent = content.join(' - ');
-            } else {
-                popup.textContent = 'No meaning available';
-            }
-            
-            wordSpan.appendChild(popup);
-            fragment.appendChild(wordSpan);
-            
-            // Mark this range as processed
-            this.markRangeProcessed(position, position + word.word.length, processedIndexes);
-            
-            lastIndex = position + word.word.length;
-        }
-        
-        // Add remaining text
-        if (lastIndex < text.length) {
-            fragment.appendChild(
-                document.createTextNode(text.substring(lastIndex))
-            );
-        }
-    }
-    
-    /**
-     * Check if a range of text has already been processed
-     * @param {number} start - Start index
-     * @param {number} end - End index
-     * @param {Set} processedIndexes - Set of already processed indexes
-     * @returns {boolean} - True if any part of the range has been processed
-     */
-    isRangeProcessed(start, end, processedIndexes) {
-        for (let i = start; i < end; i++) {
-            if (processedIndexes.has(i)) {
-                return true;
+            // Recurse for other elements
+            for (let i = 0; i < node.childNodes.length; i++) {
+                this.collectTextNodes(node.childNodes[i], textNodes);
             }
         }
-        return false;
-    }
-    
-    /**
-     * Mark a range of text as processed
-     * @param {number} start - Start index
-     * @param {number} end - End index
-     * @param {Set} processedIndexes - Set of already processed indexes
-     */
-    markRangeProcessed(start, end, processedIndexes) {
-        for (let i = start; i < end; i++) {
-            processedIndexes.add(i);
-        }
-    }
-    
-    /**
-     * Get the base text (kanji part) from a ruby element
-     * @param {Element} rubyElement - The ruby element
-     * @returns {string} - The base text without rt or rp content
-     */
-    getRubyBase(rubyElement) {
-        let baseText = '';
-        
-        Array.from(rubyElement.childNodes).forEach(child => {
-            // Skip rt and rp elements
-            if (child.nodeName.toLowerCase() === 'rt' || child.nodeName.toLowerCase() === 'rp') {
-                return;
-            }
-            
-            // If it's a text node, add its content
-            if (child.nodeType === Node.TEXT_NODE) {
-                baseText += child.textContent;
-            }
-            // For other element nodes, check if they're not rt or rp
-            else if (child.nodeType === Node.ELEMENT_NODE) {
-                if (child.nodeName.toLowerCase() !== 'rt' && child.nodeName.toLowerCase() !== 'rp') {
-                    baseText += child.textContent;
-                }
-            }
-        });
-        
-        // Clean the text - remove parentheses and whitespace
-        baseText = baseText.replace(/[()]/g, '').trim();
-        
-        return baseText;
     }
     
     /**
@@ -656,68 +535,94 @@ class VideoPlayer {
      */
     async lookupWholeWord(wordObj) {
         const word = wordObj.word;
-        console.log(`Looking up whole word: "${word}"`);
         
         try {
             // Try inflected search first
-            console.log(`Using /search/inflected for "${word}"`);
             const inflectedUrl = `http://localhost:3000/search/inflected?q=${encodeURIComponent(word)}`;
             const response = await fetch(inflectedUrl);
             
             if (response.ok) {
                 const data = await response.json();
-                console.log(`/search/inflected response for "${word}":`, data);
                 
                 if (data.matches && data.matches.length > 0) {
-                    // Find exact match first
-                    const exactMatch = data.matches.find(m => m.word === word);
-                    if (exactMatch && exactMatch.meaning) {
-                        wordObj.data.meaning = exactMatch.meaning;
-                        console.log(`Found exact meaning for "${word}": ${exactMatch.meaning}`);
+                    // First, look for exact match with non-empty meaning
+                    const exactMatchWithMeaning = data.matches.find(m => 
+                        m.word === word && m.meaning && m.meaning.trim() !== ''
+                    );
+                    
+                    if (exactMatchWithMeaning) {
+                        wordObj.data.meaning = exactMatchWithMeaning.meaning;
                         return;
                     }
                     
-                    // Use first match as fallback
+                    // Next, look for any match with non-empty meaning
+                    const anyMatchWithMeaning = data.matches.find(m => 
+                        m.meaning && m.meaning.trim() !== ''
+                    );
+                    
+                    if (anyMatchWithMeaning) {
+                        wordObj.data.meaning = anyMatchWithMeaning.meaning;
+                        return;
+                    }
+                    
+                    // Use first match as last resort
                     if (data.matches[0].meaning) {
                         wordObj.data.meaning = data.matches[0].meaning;
-                        console.log(`Using first match meaning for "${word}": ${data.matches[0].meaning}`);
-                        return;
                     }
                 }
             }
             
-            // If inflected search failed, try direct search
-            console.log(`Trying direct search for "${word}"`);
+            // If inflected search failed or no meaning found, try direct search
             const directUrl = `http://localhost:3000/search?q=${encodeURIComponent(word)}`;
             const directResponse = await fetch(directUrl);
             
             if (directResponse.ok) {
                 const directData = await directResponse.json();
-                if (directData.matches && directData.matches.length > 0 && directData.matches[0].meaning) {
-                    wordObj.data.meaning = directData.matches[0].meaning;
-                    console.log(`Found direct meaning for "${word}": ${directData.matches[0].meaning}`);
-                    return;
+                if (directData.matches && directData.matches.length > 0) {
+                    // Look for matches with non-empty meaning
+                    const matchWithMeaning = directData.matches.find(m => 
+                        m.meaning && m.meaning.trim() !== ''
+                    );
+                    
+                    if (matchWithMeaning) {
+                        wordObj.data.meaning = matchWithMeaning.meaning;
+                        return;
+                    }
                 }
             }
             
             // If both inflected and direct search failed, try partial search
-            console.log(`Trying partial search for "${word}"`);
             const partialUrl = `http://localhost:3000/search/partial?q=${encodeURIComponent(word)}&limit=5`;
             const partialResponse = await fetch(partialUrl);
             
             if (partialResponse.ok) {
                 const partialData = await partialResponse.json();
-                console.log(`/search/partial response for "${word}":`, partialData);
                 
-                if (partialData.matches && partialData.matches.length > 0 && partialData.matches[0].meaning) {
-                    wordObj.data.meaning = partialData.matches[0].meaning;
-                    console.log(`Found partial match meaning for "${word}": ${partialData.matches[0].meaning}`);
-                    return;
+                if (partialData.matches && partialData.matches.length > 0) {
+                    // Look for exact match with non-empty meaning
+                    const exactPartialMatch = partialData.matches.find(m => 
+                        m.word === word && m.meaning && m.meaning.trim() !== ''
+                    );
+                    
+                    if (exactPartialMatch) {
+                        wordObj.data.meaning = exactPartialMatch.meaning;
+                        return;
+                    }
+                    
+                    // Look for any match with meaning
+                    const anyPartialMatchWithMeaning = partialData.matches.find(m => 
+                        m.meaning && m.meaning.trim() !== ''
+                    );
+                    
+                    if (anyPartialMatchWithMeaning) {
+                        wordObj.data.meaning = anyPartialMatchWithMeaning.meaning;
+                        return;
+                    }
                 }
             }
             
             // If all else fails, set a default meaning
-            if (!wordObj.data.meaning) {
+            if (!wordObj.data.meaning || wordObj.data.meaning.trim() === '') {
                 wordObj.data.meaning = "No definition found";
             }
         } catch (error) {

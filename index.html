@@ -170,6 +170,9 @@
     <script src="https://unpkg.com/kuroshiro@1.1.2/dist/kuroshiro.min.js"></script>
     <script src="https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js"></script>
     
+    <!-- TinySegmenter for Japanese word segmentation -->
+    <script src="tiny_segmenter.js"></script>
+    
     <!-- Check if libraries loaded correctly -->
     <script>
         window.addEventListener('load', function() {
@@ -183,6 +186,14 @@
                 console.error('KuromojiAnalyzer not loaded correctly');
                 document.getElementById('loading-status').textContent = 
                     'Error: KuromojiAnalyzer library not loaded. Check console for details.';
+            }
+            
+            if (typeof TinySegmenter === 'undefined') {
+                console.error('TinySegmenter not loaded correctly');
+                document.getElementById('loading-status').textContent = 
+                    'Error: TinySegmenter library not loaded. Check console for details.';
+            } else {
+                console.log('TinySegmenter loaded successfully');
             }
         });
     </script>

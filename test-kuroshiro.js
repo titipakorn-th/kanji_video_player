@@ -6,6 +6,7 @@
 const Kuroshiro = require("kuroshiro");
 const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
 
+
 async function testKuroshiro() {
   try {
     console.log("Initializing Kuroshiro...");
@@ -13,9 +14,10 @@ async function testKuroshiro() {
     console.log("Kuromoji Analyzer version:", require("kuroshiro-analyzer-kuromoji/package.json").version);
     
     const kuroshiro = new Kuroshiro();
-    await kuroshiro.init(new KuromojiAnalyzer());
+    const analyzer = new KuromojiAnalyzer();
+    await kuroshiro.init(analyzer);
     
-    const text = "感じ取れたら手を繋ごう、重なるのは人生のライン and レミリア最高！";
+    const text = "その後にふきくりがちゃんと片栗粉がある程度焦げ目がついた方が今回の美味しいと思うので";
     console.log("Original text:", text);
     
     // Test hasKanji
@@ -25,6 +27,10 @@ async function testKuroshiro() {
     const result = await kuroshiro.convert(text, {mode:"furigana", to:"hiragana"});
     console.log("Converted text:", result);
     
+    // Analyze the text using the initialized analyzer
+    const tokens = await analyzer.parse(text);
+    console.log("Tokenization result:", tokens);
+
     console.log("Kuroshiro test successful!");
   } catch (error) {
     console.error("Error testing Kuroshiro:", error);
